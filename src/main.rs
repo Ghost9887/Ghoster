@@ -8,16 +8,35 @@ use std::{
     io::{self, Write}, 
 };
 
+enum Element_Type {
+    File,
+    Directory,
+    HiddenFile,
+}
+
+struct Element {
+    name: String,
+    elemnt_type: Element_Type,
+}
+struct Dir {
+    count: usize,
+    elements: Vec<Element>,
+}
+impl Dir {
+    pub fn new() -> Self {
+        Dir{ count: 0, elements: Vec::new() }
+    }
+    pub fn push_element(&mut self, element: Element) {
+        self.elements.push(element);
+        self.count += 1;
+    }
+}
+
 fn main() -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    let label = b"Hello, World!";
     loop{
         let _ = queue!(stdout, Clear(ClearType::All));
-        let (w, h) = size()?;
-        let _ = queue!(stdout, MoveTo( w / 2 - label.len() as u16 / 2, h / 2));
-        stdout.write(label)?;
-        stdout.flush()?;
         if let Event::Key(key) = event::read()? {
             match key.code {
                 KeyCode::Char('q') => break,
