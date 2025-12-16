@@ -1,14 +1,14 @@
-use crossterm::{ 
-    terminal::{Clear, ClearType, enable_raw_mode, disable_raw_mode, size},
+use crossterm::{
+    cursor::MoveTo,
+    event::{self, Event, KeyCode},
     queue,
-    event::{self, KeyCode, Event},
-    cursor::{MoveTo},
+    terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode, size},
 };
 use std::{
-    io::{self, Write}, 
+    error::Error,
     fs::{self},
-    error::{Error},
-    path::{Path},
+    io::{self, Write},
+    path::Path,
 };
 
 enum ElementType {
@@ -30,11 +30,11 @@ struct Global {
 impl Global {
     pub fn new() -> Self {
         let (t_width, t_height) = size().unwrap();
-        Global { 
-            index: 0, 
-            t_height: t_height, 
-            t_width: t_width, 
-            mode: Mode::Navigating, 
+        Global {
+            index: 1,
+            t_height: t_height,
+            t_width: t_width,
+            mode: Mode::Navigating,
         }
     }
 }
@@ -45,7 +45,10 @@ struct Element {
 }
 impl Element {
     pub fn new(new_name: String, new_element_type: ElementType) -> Self {
-        Element{ name: new_name, element_type: new_element_type }
+        Element {
+            name: new_name,
+            element_type: new_element_type,
+        }
     }
 }
 struct Dir {
@@ -56,7 +59,12 @@ struct Dir {
 }
 impl Dir {
     pub fn new() -> Self {
-        Dir{ count: 0, elements: Vec::new(), path: String::from("/") , parent_path: String::new() }
+        Dir {
+            count: 0,
+            elements: Vec::new(),
+            path: String::from("/"),
+            parent_path: String::new(),
+        }
     }
     pub fn push_element(&mut self, element: Element) {
         self.elements.push(element);
@@ -67,28 +75,30 @@ impl Dir {
     }
 }
 
-fn get_elements_from_dir(dir: &mut Dir, global: &mut Global) -> Result<(), Box<dyn Error>> {
-    dir.clear_elements();
-
-    let path_name = &dir.path;
+fn get_parent(path_name: &str) -> String {
     let path = Path::new(path_name);
     let parent = path.parent();
     match parent {
-        Some(p) => dir.parent_path = p.to_string_lossy().to_string(),
-        None => dir.parent_path = String::from("/"),
+        Some(p) => p.to_string_lossy().to_string(),
+        None => String::from("/"),
     }
-    dir.push_element(Element::new(String::from(format!("{}", dir.path)), ElementType::File));
+}
+
+fn get_elements_from_dir(dir: &mut Dir, global: &mut Global) -> Result<(), Box<dyn Error>> {
+    dir.clear_elements();
+    dir.parent_path = get_parent(&dir.path);
     dir.push_element(Element::new(String::from("(Back)"), ElementType::Return));
     for element in fs::read_dir(&dir.path)? {
         let element = element?;
         let file_type = if element.file_type()?.is_dir() {
-                ElementType::Directory
-            }else if element.file_type()?.is_file() {
-                ElementType::File
-            }else {
-                ElementType::File
-            };
-        dir.push_element(Element::new(element.file_name().into_string().unwrap(), file_type));
+            ElementType::Directory
+        } else {
+            ElementType::File
+        };
+        dir.push_element(Element::new(
+            element.file_name().into_string().unwrap(),
+            file_type,
+        ));
     }
     dir.count = dir.elements.len();
     if dir.count < global.index {
@@ -97,16 +107,19 @@ fn get_elements_from_dir(dir: &mut Dir, global: &mut Global) -> Result<(), Box<d
     Ok(())
 }
 
+//TODO: scrolling
 fn print_elements(dir: &Dir, global: &Global) -> io::Result<()> {
     let mut stdout = io::stdout();
+    let _ = queue!(stdout, MoveTo(0, 0));
+    stdout.write_all(dir.path.as_bytes())?;
     for (i, element) in dir.elements.iter().enumerate() {
-        let _ = queue!(stdout, MoveTo(0, i as u16));
+        let _ = queue!(stdout, MoveTo(0, (i + 1) as u16));
         let name = &element.name;
         if i == global.index {
             let selected_name = format!("{name} <-");
-            stdout.write(selected_name.as_bytes())?;
-        }else {
-            stdout.write(name.as_bytes())?;
+            stdout.write_all(selected_name.as_bytes())?;
+        } else {
+            stdout.write_all(name.as_bytes())?;
         }
     }
     Ok(())
@@ -117,12 +130,12 @@ fn main() -> io::Result<()> {
     let mut dir = Dir::new();
     let mut global = Global::new();
     let mut stdout = io::stdout();
-    loop{
+    loop {
         let _ = get_elements_from_dir(&mut dir, &mut global);
         let _ = queue!(stdout, Clear(ClearType::All));
         print_elements(&dir, &global)?;
         let _ = queue!(stdout, MoveTo(0, global.t_height - 2));
-        stdout.write(("─".repeat(global.t_width as usize)).as_bytes())?;
+        stdout.write_all(("─".repeat(global.t_width as usize)).as_bytes())?;
         let _ = queue!(stdout, MoveTo(0, global.t_height));
         stdout.flush()?;
         if let Event::Key(key) = event::read()? {
@@ -140,24 +153,22 @@ fn main() -> io::Result<()> {
                 }
                 KeyCode::Enter => {
                     //go back
-                    if global.index < 2 {
+                    if global.index < 1 {
                         if dir.path.len() > 1 {
                             dir.path = dir.parent_path.clone();
-                        }
-                        else {
+                        } else {
                             continue;
                         }
-                    }
-                    else {
+                    } else {
                         let dir_name = &dir.elements[global.index].name;
                         if dir.path.len() > 1 {
                             dir.path.push_str(format!("/{}", dir_name).as_str());
-                        }else {
+                        } else {
                             dir.path.push_str(format!("{}", dir_name).as_str());
                         }
                     }
                 }
-                _ => {},
+                _ => {}
             }
         }
     }
